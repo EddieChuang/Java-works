@@ -1,9 +1,4 @@
-package ascdc.sinica.dhtext.solr;
-
-
-
-
-
+package ascdc.sinica.dhtext.tool.solr;
 
 
 import java.io.BufferedReader;
@@ -32,12 +27,21 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import org.json.*;
 
+import com.mashape.unirest.http.Headers;
+
 import ascdc.sinica.dhtext.util.io.JSONOperate;
+import ascdc.sinica.dhtext.util.sort.KeywordLengthSort;
 
 
 public class UploadAuthority {
 	
+	AuthorityFileUploadException authorityFileUploadException = null;
+
 	
+	public UploadAuthority(){
+		authorityFileUploadException = new AuthorityFileUploadException();
+
+	}
 	
 	@SuppressWarnings("deprecation")
 	private static JSONObject listToJstreeJSON(ArrayList<String> list, ArrayList<String> headers, int i){
@@ -57,7 +61,7 @@ public class UploadAuthority {
 //						jsonObject.put("cat", header);
 						jsonObject.put("type", "subDir");
 						jsonObject.put("children", children);
-						jsonObject.put("text", data);
+						jsonObject.put("text", data.trim());
 						return jsonObject;
 					}
 				} catch (JSONException e) {
@@ -82,109 +86,96 @@ public class UploadAuthority {
 		
 		jsonObj.put("cat", "目錄");
 		jsonObj.put("type", "default");
-		jsonObj.put("text", title);
+		jsonObj.put("text", title.trim());
 		jsonObj.put("children", jsonArr); 
 		
 		return jsonObj;
 	}
 	
-	private static JSONArray toSolrDoc(String filepath, String filename, String title, String authorityId, String sep){
+
+	private ArrayList<ArrayList<String>> parseMultikeyword(ArrayList<String> row_data, boolean setNote){
 		
-		FileInputStream fileInputStream = null;
-		Scanner scanner = null;
-		JSONArray arr = new JSONArray();
+		String sep = "\\|";
+		ArrayList<ArrayList<String>> new_data = new ArrayList<ArrayList<String>>();
+		int indexOfKeyword = row_data.size() - (setNote ? 2 : 1);
+		String[] keyowrds = row_data.get(indexOfKeyword).split(sep);
+
+		for(int i = 0; i < keyowrds.length; ++i){
+			row_data.set(indexOfKeyword, keyowrds[i]);
+			new_data.add(new ArrayList<String>(row_data));
+		}
 		
-		HashSet<String> keyword_set = new HashSet<String>(); // 重複的關鍵字
-		try {
-			fileInputStream = new FileInputStream(filepath + filename);
-			scanner = new Scanner(fileInputStream, "UTF-8");
-			
-			String[] headers = scanner.nextLine().split(sep);
-			int limit = headers.length;
-			int num = 0;
-			while(scanner.hasNextLine()){
-				
-				String[] keywords = scanner.nextLine().split(sep, limit);
-				
-				// get path
-				String path = title + "/";
-				int i;
-				for(i = 0; i < headers.length-2; ++i){
-					if(!keywords[i].equals(""))
-						path += keywords[i] + "/";
-				}
-				
-				// 過濾空字串和重複的關鍵字
-				String keyword = keywords[i++];
-				if(!keyword.equals("") && !keyword_set.contains(path + keyword)){
-					JSONObject json = new JSONObject();
-					json.put("id", authorityId + "-" + Integer.toString(num++));
-					json.put("authorityId", authorityId);
-					json.put("path", path);
-					json.put("text", keyword);
-					
-					if(!sep.equals("\n"))
-						json.put("note", keywords[i].equals("") ? "無" : keywords[i]);
-					else
-						json.put("note", "無");
-					arr.put(json);
-					keyword_set.add(path + keyword);
-				}
-			}			
-			fileInputStream.close();
-			scanner.close();
 		
-		} catch(IOException e){
-			e.printStackTrace();
-		} 
-		
-		return arr;
+		return new_data;
 	}
 	
-	private static ArrayList<ArrayList<String>> readTextUploadFile(String filepath, String filename, String sep, boolean setNote) throws AuthorityFileUploadException{
+	private ArrayList<ArrayList<String>> readTextUploadFile(String filepath, String filename, String sep, boolean setNote) throws AuthorityFileUploadException{
 
 		FileInputStream fileInputStream = null;
 		Scanner scanner = null;
 		ArrayList<ArrayList<String>> data = new ArrayList<ArrayList<String>>();
+		boolean isTxt = sep.equals("\n");
+		
 		try {
 			fileInputStream = new FileInputStream(filepath + filename);
 			scanner = new Scanner(fileInputStream, "UTF-8");
+			ArrayList<String> header = null;
+			int limit = 1, num = 1;
 			
-			String[] headers = scanner.nextLine().split(sep);
+			if(!isTxt){ // .txt不需要驗證資料格式
+				header = new ArrayList<String>(Arrays.asList(scanner.nextLine().split(sep)));
+				this.authorityFileUploadException.setHeader(header);
+				validateHeader(header, setNote);
+				limit = header.size();
+			}
 			
-			int limit = headers.length;
-			System.out.println("limit: " + limit);
+			System.out.println("header: " + header);
 			while(scanner.hasNextLine()){
 				String[] texts = scanner.nextLine().split(sep, limit);
-				
 				ArrayList<String> row_data = new ArrayList<String>(Arrays.asList(texts));
-				if(!sep.equals("\n"))
-					validate(row_data, limit, setNote, data.size()+1);
-				data.add(row_data);
+				if(isTxt){ // .txt不需要驗證資料格式，也不會有多個關鍵字在同一欄位
+					data.add(row_data);
+				} else{
+					if(validate(row_data, setNote, num)){
+						ArrayList<ArrayList<String>> multikeyword = parseMultikeyword(row_data, setNote); // 解析同一欄位多個關鍵字
+						for(int i = 0; i < multikeyword.size(); ++i){
+							data.add(multikeyword.get(i));
+						}
+					}
+					++num;
+				}
 			}
-
 			fileInputStream.close();
 			scanner.close();
-		
 		} catch(IOException e){
 			e.printStackTrace();
 		}
 		
+		if(this.authorityFileUploadException.getHasException()){
+			throw this.authorityFileUploadException;
+		}
+		
 		return data; 
 	}
-	
-	
+
 	public static ArrayList<String> XSSFRowToHeader(XSSFRow row){
 		
 		ArrayList<String> header = new ArrayList<String>();
 		Iterator<Cell> cells = row.cellIterator();
-		
-		while(cells.hasNext()){
-			XSSFCell cell = (XSSFCell) cells.next();
-			if(cell.getCellType() == XSSFCell.CELL_TYPE_STRING){
-				header.add(cell.getStringCellValue());
-			}
+		int n = row.getLastCellNum();
+		for(int i = 0; i < n; ++i){
+			XSSFCell cell = row.getCell(i);
+			header.add(cell==null ? "" : cell.getStringCellValue().trim());
 		}
+//		System.out.println(row.getLastCellNum());
+//		while(cells.hasNext()){
+//			
+//			XSSFCell cell = (XSSFCell) cells.next();
+////			if(cell.getCellType() == XSSFCell.CELL_TYPE_STRING){
+//				header.add(cell.getStringCellValue());
+////			}
+//			System.out.println("cell: " + cell.getStringCellValue());
+//		}
 		
 		// 忽略後面欄位的空字串
 		for(int i = header.size()-1; i >= 0; --i){
@@ -194,6 +185,7 @@ public class UploadAuthority {
 				break;
 			}
 		}
+		// System.out.println(header);
 		
 		return header;
 	}
@@ -205,7 +197,7 @@ public class UploadAuthority {
 		
 		while(cells.hasNext() && limit > 0){
 			XSSFCell cell = (XSSFCell) cells.next();
-			list.add(cell.getStringCellValue());
+			list.add(cell.getStringCellValue().trim());
 			--limit;
 		}
 		
@@ -303,9 +295,8 @@ public class UploadAuthority {
 
 		JSONArray arr = new JSONArray();
 		
-		HashSet<String> keyword_set = new HashSet<String>(); // 重複的關鍵字
-	
-		int num = 0;
+		HashSet<String> keyword_set = new HashSet<String>(); // 相同路徑重複的關鍵字
+		HashMap<String, String> loc = new HashMap<String, String>(); 
 		for(ArrayList<String> row : data){
 							
 			// get path
@@ -319,23 +310,29 @@ public class UploadAuthority {
 			// 過濾空字串和重複的關鍵字
 			String keyword = row.get(i++);
 			String note = i==row.size() ? "無" : (row.get(i).equals("") ? "無" : row.get(i));
+			if(keyword_set.contains(path + keyword)){
+				System.out.println("duplicate: " + row);
+			}
 			if(!keyword.equals("") && !keyword_set.contains(path + keyword)){
+				if(!loc.containsKey(keyword)){
+					loc.put(keyword, String.valueOf(loc.size()));
+				}
 				JSONObject json = new JSONObject();
-				json.put("id", authorityId + "-" + Integer.toString(num++));
 				json.put("authorityId", authorityId);
+				json.put("loc", loc.get(keyword));
 				json.put("path", path);
-				json.put("text", keyword);
+				json.put("text", keyword.trim());
 				json.put("note", note);
-				System.out.println(json);
+				json.put("hidden", "false");
 				arr.put(json);
 				keyword_set.add(path + keyword);
 			}
-		}			
+		}
 
 		return arr;
 	}
 	
-	public static JSONArray csvToSolrDoc(String filepath, String filename, String title, String authorityId, boolean setNote)throws AuthorityFileUploadException{
+	public JSONArray csvToSolrDoc(String filepath, String filename, String title, String authorityId, boolean setNote)throws AuthorityFileUploadException{
 		
 		String sep = ",";
 		ArrayList<ArrayList<String>> data = readTextUploadFile(filepath, filename, sep, setNote);
@@ -343,8 +340,7 @@ public class UploadAuthority {
 		return toSolrDoc(filepath, filename, title, authorityId, data);
 	}
 	
-	
-	public static JSONArray tsvToSolrDoc(String filepath, String filename, String title, String authorityId, boolean setNote) throws AuthorityFileUploadException{
+	public JSONArray tsvToSolrDoc(String filepath, String filename, String title, String authorityId, boolean setNote) throws AuthorityFileUploadException{
 		
 		String sep = "\t";
 		ArrayList<ArrayList<String>> data = readTextUploadFile(filepath, filename, sep, setNote);
@@ -352,8 +348,7 @@ public class UploadAuthority {
 		return toSolrDoc(filepath, filename, title, authorityId, data);
 	}
 	
-	
-	public static JSONArray txtToSolrDoc(String filepath, String filename, String title, String authorityId, boolean setNote) throws AuthorityFileUploadException{
+	public JSONArray txtToSolrDoc(String filepath, String filename, String title, String authorityId, boolean setNote) throws AuthorityFileUploadException{
 	
 		String sep = "\n";
 		ArrayList<ArrayList<String>> data = readTextUploadFile(filepath, filename, sep, setNote);
@@ -361,7 +356,7 @@ public class UploadAuthority {
 	}
 	
 	@SuppressWarnings("deprecation")
-	public static JSONArray xlsxToSolrDoc(String filepath, String filename, String title, String authorityId, boolean setNote) throws AuthorityFileUploadException{
+	public JSONArray xlsxToSolrDoc(String filepath, String filename, String title, String authorityId, boolean setNote) throws AuthorityFileUploadException{
 		
 		ArrayList<ArrayList<String>> data = new ArrayList<ArrayList<String>>();
 		
@@ -371,93 +366,161 @@ public class UploadAuthority {
 			XSSFSheet sheet = workbook.getSheetAt(0);			
 			Iterator<Row> rows = sheet.rowIterator();
 			
-			ArrayList<String> headers = UploadAuthority.XSSFRowToHeader((XSSFRow) rows.next());
+			ArrayList<String> header = UploadAuthority.XSSFRowToHeader((XSSFRow) rows.next());
+			this.authorityFileUploadException.setHeader(header);
+			validateHeader(header, setNote);
 			
-			
-			System.out.println(headers);
-			int limit = headers.size(); 
+			int limit = header.size(), num = 1; 
 			while(rows.hasNext()){
 				XSSFRow row = (XSSFRow) rows.next();
 				ArrayList<String> row_data = UploadAuthority.XSSFRowToArrayList(row, limit);
-				validate(row_data, limit, setNote, data.size()+1); // throw AuthorityFileUploadException
-				data.add(row_data);
-				
+				if(validate(row_data, setNote, num)){
+					ArrayList<ArrayList<String>> multikeyword = parseMultikeyword(row_data, setNote); // 解析同一欄位多個關鍵字
+					for(int i = 0; i < multikeyword.size(); ++i){
+						data.add(multikeyword.get(i));
+					}
+				}
+				++num;
 			}
 			workbook.close();
 		}  catch (IOException | JSONException e) {
 			e.printStackTrace();
 		}
+
+		if(this.authorityFileUploadException.getHasException()){
+			throw this.authorityFileUploadException;
+		}
 		return toSolrDoc(filepath, filename, title, authorityId, data);
 	}
-	public static void x(ArrayList<String> row_data, int limit, boolean setNote, int index) throws AuthorityFileUploadException{}
-	public static void validate(ArrayList<String> row_data, int limit, boolean setNote, int index) throws AuthorityFileUploadException{
+	
+	public void validateHeader(ArrayList<String> header, boolean setNote) throws AuthorityFileUploadException{
 		
-		// n-1:註解, n-2:權威詞, n-3 ~ 0: 階層
-		int n = row_data.size();
-		if(n != limit){			
-			throw new AuthorityFileUploadException("第" + index + "筆資料欄位數量錯誤");
-		} else if(setNote && row_data.get(n-2).equals("")){
-			throw new AuthorityFileUploadException("權威詞欄位不能是空的");
-		} else if(!setNote && row_data.get(n-1).equals("")){
-			throw new AuthorityFileUploadException("權威詞欄位不能是空的");
+		Map<String, String> header_json = new LinkedHashMap<String, String>();
+		int x = setNote ? 2 : 1;
+		int i;
+		
+		for(i = 0; i < header.size() - x; ++i)
+			header_json.put("第" + (i+1) + "層", header.get(i).equals("") ? "\" \"" : header.get(i));
+		
+		header_json.put("名", header.get(i++).equals("") ? "\" \"" : header.get(i-1));
+		if(!header.get(i-1).equals("名")){
+			this.authorityFileUploadException.appendErrorMessage("標頭缺少「名」欄位");
+			this.authorityFileUploadException.appendErrorData(header_json);
+			this.authorityFileUploadException.setHasException(true);
+			throw this.authorityFileUploadException;
 		}
 		
-		// 無階層
-		if(n - 3 > 0){
-			boolean hasValue = !row_data.get(n-3).equals("");
-			for(int i = n - 4; i >= 0; --i){
-				if(hasValue && row_data.get(i).equals("")){
-					throw new AuthorityFileUploadException("第" + index + "筆資料階層格式錯誤");
+		if(setNote){
+			if(i < header.size()){
+				header_json.put("註解", header.get(i).equals("") ? "\" \"" : header.get(i));
+			} else{
+				this.authorityFileUploadException.appendErrorMessage("標頭缺少「註解」欄位");
+				this.authorityFileUploadException.appendErrorData(header_json);
+				this.authorityFileUploadException.setHasException(true);
+				throw this.authorityFileUploadException;
+			}
+		} 
+		
+		
+		
+		for(String s : header){
+			if(s.equals("")){
+				this.authorityFileUploadException.appendErrorMessage("欄位名稱不可空白");
+				this.authorityFileUploadException.appendErrorData(header_json);
+				this.authorityFileUploadException.setHasException(true);
+				throw this.authorityFileUploadException;
+			}
+		}
+	}
+	
+	public boolean validate(ArrayList<String> row_data, boolean setNote, int index) {
+		
+		ArrayList<String> header = this.authorityFileUploadException.getHeader();
+		boolean isValidate = true;
+		int n = row_data.size();
+		int m = header.size();
+		int x = setNote ? 2 : 1;
+		int i = 0;
+		Map<String, String> map = new LinkedHashMap<String, String>();
+		while(i < n)
+			map.put(header.get(i), row_data.get(i++).equals("") ? "\" \"" : row_data.get(i-1));
+		while(i < m) // header.size() > row_data.size()
+			map.put(header.get(i++), "");
+		
+		// System.out.println(row_data);
+		if(n != m){
+			this.authorityFileUploadException.appendErrorMessage("第" + index + "筆資料：欄位數量錯誤");
+			this.authorityFileUploadException.appendErrorData(map);
+			this.authorityFileUploadException.setHasException(true);
+			isValidate = false;
+		} else if(row_data.get(n-x).equals("")){ // 有註解，倒數第二個是權威詞。無註解，最後一個是權威詞
+			this.authorityFileUploadException.appendErrorMessage("第" + index + "筆資料：權威詞不可空白");
+			this.authorityFileUploadException.appendErrorData(map);
+			this.authorityFileUploadException.setHasException(true);
+			isValidate = false;
+		}
+		
+		x = setNote ? 3 : 2;
+		if(n - x > 0){
+			boolean hasValue = !row_data.get(n-x).equals("");
+			for(int j = n - x - 1; j >= 0; --j){
+				if(hasValue && row_data.get(j).equals("")){
+					this.authorityFileUploadException.appendErrorMessage("第" + index + "筆資料：階層格式錯誤");
+					this.authorityFileUploadException.appendErrorData(map);
+					this.authorityFileUploadException.setHasException(true);
+					isValidate = false;
 				}
 			}
 		}
+		return isValidate;
 		
 	}
 
 	
 	public static void main(String[] args) {
 		
-		String filepath = "data/";
+//		String filepath = "data/xlsx/";
+//		
+//		
+//		
+//		String title = "本草綱目";
+//		
+////		String filename = "藥名.txt";		
+////		String filename = "本草綱目.csv";
+////		String filename = "本草綱目-less-header-nonote.tsv";
+//		String filename = "本草綱目.xlsx";
+//		
+//		boolean setNote = true;
+//		
+//		UploadAuthority uploadAuthority = new UploadAuthority();
+//		try {
+////			JSONArray arr = uploadAuthority.txtToSolrDoc(filepath, filename, title, "0", setNote);
+////			JSONArray arr = uploadAuthority.csvToSolrDoc(filepath, filename, title, "0", setNote);
+////			JSONArray arr = uploadAuthority.tsvToSolrDoc(filepath, filename, title, "0", setNote);
+//			JSONArray arr = uploadAuthority.xlsxToSolrDoc(filepath, filename, title, "0", setNote);
+//			
+////			JSONObject obj = uploadAuthority.txtToJstreeJSON(filepath, filename, title);
+////			JSONObject obj = uploadAuthority.csvToJstreeJSON(filepath, filename, title);
+////			JSONObject obj = uploadAuthority.tsvToJstreeJSON(filepath, filename, title);
+////			JSONObject obj = uploadAuthority.xlsxToJstreeJSON(filepath, filename, title);
+//			System.out.println(arr);
+////			System.out.println(obj);
+//		} catch (AuthorityFileUploadException e) {
+//			// TODO Auto-generated catch block
+////			e.printStackTrace();
+//			String message = e.getMessage();
+//			ArrayList<Map<String, String>> error_data = e.getErrorData();
+//			ArrayList<String> error_msg = e.getErrorMessage();
+//			for(int i = 0; i < error_msg.size(); ++i){
+//				System.out.println(error_msg.get(i));
+//				System.out.println(error_data.get(i));
+//				System.out.println("");
+//			}
+//		}
 		
-		
-		
-		String title = "本草綱目";
-		
-//		String filename = "藥名.txt";		
-//		String filename = "本草綱目-note.csv";
-//		String filename = "本草綱目.tsv";
-		String filename = "本草綱目.xlsx";
-		
-		boolean setHeaders = true;
-		boolean setNote = true;
-		
-
-		try {
-//			JSONArray arr = txtToSolrDoc(filepath, filename, title, "0", setNote);
-//			JSONArray arr = csvToSolrDoc(filepath, filename, title, "0", setNote);
-//			JSONArray arr = tsvToSolrDoc(filepath, filename, title, "0", setNote);
-			JSONArray arr = xlsxToSolrDoc(filepath, filename, title, "0", setNote);
-			
-//			JSONObject obj = txtToJstreeJSON(filepath, filename, title);
-//			JSONObject obj = csvToJstreeJSON(filepath, filename, title);
-//			JSONObject obj = tsvToJstreeJSON(filepath, filename, title);
-//			JSONObject obj = xlsxToJstreeJSON(filepath, filename, title);
-			
-			System.out.println(arr);
-//			System.out.println(obj);
-		} catch (AuthorityFileUploadException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-			System.out.println(e.getMessage());
-		}
-			
-		
-
-
-		
-
-
-	    
+		Date now = new Date();
+		System.out.println(new Date().getTime() - now.getTime());
+			 
 	}
 
 }
