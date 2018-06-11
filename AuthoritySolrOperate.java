@@ -1,4 +1,4 @@
-﻿package ascdc.sinica.dhtext.util;
+﻿
 
 import java.io.BufferedWriter;
 import java.io.File;

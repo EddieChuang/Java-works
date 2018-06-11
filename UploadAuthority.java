@@ -1,7 +1,4 @@
-package ascdc.sinica.dhtext.tool.solr;
-
-
-import java.io.BufferedReader;
+﻿import java.io.BufferedReader;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -28,9 +25,6 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.json.*;
 
 import com.mashape.unirest.http.Headers;
-
-import ascdc.sinica.dhtext.util.io.JSONOperate;
-import ascdc.sinica.dhtext.util.sort.KeywordLengthSort;
 
 
 public class UploadAuthority {

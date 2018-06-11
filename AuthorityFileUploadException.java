@@ -1,6 +1,4 @@
-package ascdc.sinica.dhtext.tool.solr;
-
-import java.util.ArrayList;
+﻿import java.util.ArrayList;
 import java.util.Map;
 
 import org.json.JSONObject;
