@@ -1,7 +1,4 @@
-package ascdc.sinica.dhtext.tool.solr;
-
-
-import java.io.BufferedReader;
+﻿import java.io.BufferedReader;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -33,15 +30,11 @@ import org.json.*;
 
 import com.mashape.unirest.http.Headers;
 
-import ascdc.sinica.dhtext.tool.tree.JstreeNode;
-import ascdc.sinica.dhtext.util.io.JSONOperate;
-import ascdc.sinica.dhtext.util.sort.KeywordLengthSort;
-
 
 public class UploadAuthority {
 	
 	private String solrSpecialChar = "+-&|!{}[]^\"~*?:/\\]"; 
-	private String synonymSeparatar = "=";
+	private static String synonymSeparatar = "=";
 	
 	//上傳檔案格式錯誤時，throw authorityFileUploadException
 	AuthorityFileUploadException authorityFileUploadException = null;
@@ -50,42 +43,26 @@ public class UploadAuthority {
 		authorityFileUploadException = new AuthorityFileUploadException();
 	}
 	
-	/**
-	  * ex: ['水部', '天水類', '雨水'] -> {"type":"subDir", "text":"水部", "children":[ {"type":"subDir", "text":"天水類", "children":[...]} ]}
-	  * @param   
-	  */
-//	@SuppressWarnings("deprecation")
-//	private static JSONObject listToJstreeJSON(ArrayList<String> list, ArrayList<String> headers, int i, boolean setNote){
-//		
-////		int x = setNote ? 2 : 1;
-//		if(i < list.size()){
-//			String data = list.get(i);
-//			if(!data.equals("")){
-//				try {
-//					JSONObject jsonObject = new JSONObject();
-//					JSONArray children = new JSONArray();
-//					JSONObject child = listToJstreeJSON(list, headers, i + 1, setNote);
-//					if(child != null)
-//						children.put(child);
-//					jsonObject.put("type", "subDir");
-//					jsonObject.put("children", children);
-//					jsonObject.put("text", data.trim());
-//					return jsonObject;
-////					}
-//				} catch (JSONException e) {
-//					e.printStackTrace();
-//				}
-//			} else{
-//				return listToJstreeJSON(list, headers, i+1, setNote);
-//			}
-//		}
-//		return null;
-//	}
+	public static boolean isEmptyContent(ArrayList<String> list){
+		for(String value : list){
+			if(!value.equals("")){
+				return false;
+			}
+		}
+		return true;
+	}
 	
-	public static JSONObject toJstreeJSON(String title, ArrayList<String> header, ArrayList<JSONObject> data, boolean setNote){
+	public static ArrayList<String> toArrayList(JSONObject json, ArrayList<String> header){
 		
-//		JSONObject jsonObj = new JSONObject();
-//		JSONArray  jsonArr = new JSONArray();
+		ArrayList<String> list = new ArrayList<String>();
+		for(String key : header){
+			list.add(json.getString(key));
+		}
+		return list;
+		
+	}
+	
+	public static JSONObject toJstreeJSON(String title, ArrayList<String> header, ArrayList<JSONObject> data, boolean setNote, String userName){
 		
 		JSONObject init_data   = new JSONObject();
 		init_data.put("remove", false);
@@ -104,58 +81,24 @@ public class UploadAuthority {
 				rowDefault.add("");
 			}
 		}
-		
 		JstreeNode defaultNode = JstreeNode.toJstreeNode(rowDefault, 0);
 		defaultNode.setData(init_data); // 自訂標記不能刪除和更名
+		
+		//自訂標記加名字節點
+		JstreeNode child = new JstreeNode(userName,"subDir",false,false);
+		ArrayList<JstreeNode> alChildren = new ArrayList<JstreeNode>();
+		alChildren.add(child);
+		defaultNode.setChildren(alChildren);
 		jstree.append(defaultNode);
+		//end 自訂標記加名字節點
+		
 		
 		for(JSONObject node : data){
-			jstree.append(node); // 新增節點
+			jstree.append(toArrayList(node, header)); // 新增節點
 		}
-		
-		
-//		JSONObject jsonRowDefault = listToJstreeJSON(rowDefault, headers, 0,setNote);
-//		jsonArr = JSONOperate.appendJstree(jsonArr, jsonRowDefault);
-		
-		//end default
-		
-		/*
-		 row = ['水部', '天水類', '雨水']
-		 jstree 每個節點的格式 {"type":"subDir", "text":"水部", "children":[]} 
-	    */	
-		
-		
-//		for(ArrayList<String> row : data){
-//			JSONObject jsonRow = listToJstreeJSON(row, headers, 0, setNote);
-//			jsonArr = JSONOperate.appendJstree(jsonArr, jsonRow);			
-//		}
-		
-//		jsonObj.put("cat", "目錄");
-//		jsonObj.put("type", "default");
-//		jsonObj.put("text", title.trim());
-//		jsonObj.put("children", jsonArr); 
-		
-//		System.out.println(jstree.toJSON());
+	
 		return jstree.toJSON();
 	}
-	
-	/**
-	  * 解析同一個欄位的多個權威詞
-	  * @param   
-	  */
-//	private ArrayList<ArrayList<String>> parseMultikeyword(ArrayList<String> row_data, boolean setNote){
-//		
-//		String sep = this.multikeywordSeparatar;
-//		ArrayList<ArrayList<String>> new_data = new ArrayList<ArrayList<String>>();
-//		int indexOfKeyword = row_data.size() - (setNote ? 2 : 1); // keyword的位置。如果setNote==true，權威詞在倒數第二個位置。setNote==false，則是在最後一個位置
-//		String[] keyowrds = row_data.get(indexOfKeyword).split(sep);
-//
-//		for(int i = 0; i < keyowrds.length; ++i){
-//			row_data.set(indexOfKeyword, keyowrds[i]);
-//			new_data.add(new ArrayList<String>(row_data));
-//		}
-//		return new_data;
-//	}
 	
 	/**
 	 * 讀 text file，包含 txt, csv, tsv
@@ -173,7 +116,7 @@ public class UploadAuthority {
 		try {
 			fileInputStream = new FileInputStream(filePath + fileName);
 			scanner = new Scanner(fileInputStream, "UTF-8");
-			ArrayList<String> header = null;
+			ArrayList<String> header = new ArrayList<String>();
 			int limit = 1, num = 1; // 第 num 行
 			
 			if(!isTxt){ // .txt不需要驗證資料格式
@@ -181,6 +124,9 @@ public class UploadAuthority {
 				this.authorityFileUploadException.setHeader(header);
 				validateHeader(header, setNote); // 驗證 header 格式
 				limit = header.size(); // 以 header 的欄位數為基準
+			} else {
+				header.add("名");
+				header.add("註解");
 			}
 			
 			System.out.println("header: " + header);
@@ -188,12 +134,13 @@ public class UploadAuthority {
 			while(scanner.hasNextLine()){
 				String[] texts = scanner.nextLine().split(sep, limit);
 				JSONObject json = UploadAuthority.convertToJSONObject(new ArrayList<String>(Arrays.asList(texts)), header);
+				System.out.println(json);
 				if(isTxt){ // .txt不需要驗證資料格式，也不會有多個關鍵字在同一欄位
+					json.put("註解", "");
 					data.add(json);
 				} else{
-					if(validate2(json, num)){
+					if(validate(json, num)){
 						ArrayList<JSONObject> synonym = parseSynonym(json, header, setNote);
-//						System.out.println("synonym: " + synonym);
 						data.addAll(synonym);
 					}
 					++num;
@@ -271,9 +218,9 @@ public class UploadAuthority {
 	 * @param title    檔威檔標題   ex: "本草綱目"
 	 * */
 	@SuppressWarnings("deprecation")
-	public static JSONObject xlsxToJstreeJSON(String filePath, String fileName, String title, boolean setNote){
+	public static JSONObject xlsxToJstreeJSON(String filePath, String fileName, String title, boolean setNote, String userName){
 		
-		ArrayList<ArrayList<String>> data = new ArrayList<ArrayList<String>>();
+		ArrayList<JSONObject> data = new ArrayList<JSONObject>();
 		ArrayList<String> header = null;
 		try {
 			// Excel -> XSSFWorkbook -> XSSFSheet -> XSSFRow -> XSSFCell
@@ -282,26 +229,38 @@ public class UploadAuthority {
 			XSSFSheet sheet = workbook.getSheetAt(0); // 取得第一個試算表
 			Iterator<Row> rows = sheet.rowIterator(); // 取得試算表的 row iterator
 			header = UploadAuthority.XSSFRowToHeader((XSSFRow) rows.next()); // 第一行當作 header
-			
+			header.remove(header.size() - 1); 
+			if(setNote){
+				header.remove(header.size() - 1);
+			}
 			HashSet<String> set = new HashSet<String>();
 			
 			// 讀每一行的資料
 			while(rows.hasNext()){
+				
+				
 				XSSFRow row = (XSSFRow) rows.next();
+				if(isEmptyXSSFRow(row)){
+					continue;
+				}
+				
 				ArrayList<String> list = XSSFRowToArrayList(row, header.size());
+				JSONObject json = convertToJSONObject(list, header);
+				System.out.println("xlsxToJstreeJSON json: " + json);
 				
-				// 建立 jstree 只需要 path，所以將權威詞刪掉，如果有註解的話也刪掉‧
-				list.remove(list.size() - 1); 
-				if(setNote){
-					list.remove(list.size() - 1);
+				// 建立 jstree 只需要 path，所以將權威詞刪掉，如果有註解的話也刪掉
+				if(json.has("名")){
+					json.remove("名");
+				}
+				if(json.has("註解")){
+					json.remove("註解");
 				}
 				
-				// 過濾重複的路徑
-				if(!set.contains(list.toString())){
-					set.add(list.toString());
-					data.add(list);
-				}
+				ArrayList<JSONObject> synonym = parseSynonym(json, header, setNote);
+////			System.out.println("synonym: " + synonym);
+				data.addAll(synonym);
 			}
+			
 			
 			// 按照 path asc 排序，以符合取出 solr document 的順序
 			Collections.sort(data, pathComparator);
@@ -309,18 +268,17 @@ public class UploadAuthority {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-		
 		// 轉換成 jstree json 的格式，讓前端jstree library可以直接讀取
-		return toJstreeJSON(title, header, data, setNote);
+		return toJstreeJSON(title, header, data, setNote, userName);
 	}
 	
 	/**
 	 * txt的權威檔沒有階層
 	 * @param title    檔威檔標題   ex: "本草綱目"
 	 * */
-	public static JSONObject txtToJstreeJSON(String title, boolean setNote){
+	public static JSONObject txtToJstreeJSON(String title, boolean setNote, String userName){
 	
-		return toJstreeJSON(title, new ArrayList<String>(),new ArrayList<ArrayList<String>>() , setNote);
+		return toJstreeJSON(title, new ArrayList<String>(), new ArrayList<JSONObject>(), setNote, userName);
 	}
 	
 	/**
@@ -329,7 +287,7 @@ public class UploadAuthority {
 	 * @param fileName 權威檔名        ex: "本草綱目.csv"
 	 * @param title    檔威檔標題   ex: "本草綱目"
 	 * */
-	public JSONObject csvToJstreeJSON(String filePath, String fileName, String title, boolean setNote){
+	public JSONObject csvToJstreeJSON(String filePath, String fileName, String title, boolean setNote, String userName){
 		
 		String sep = ",";
 		FileInputStream fileInputStream = null;
@@ -343,20 +301,30 @@ public class UploadAuthority {
 			// 第一行當作 header，以 header 的欄位數為基準
 			header = new ArrayList<String>(Arrays.asList(scanner.nextLine().split(sep)));
 			int col = header.size();
+			header.remove(header.size()-1);
+			if(setNote){
+				header.remove(header.size()-1);
+			}
 			while(scanner.hasNextLine()){
 				
 				// "a,b,c,d".split(sep, col)
 				// 如果該筆資料的欄位數小於 col不影響結果。col=5, ["a", "b", "c", "d"]
 				// 如果該筆資料的欄位數大於 col會截斷字串。col=3, ["a", "b", "c,d"]
+
 				ArrayList<String> list = new ArrayList<String>(Arrays.asList(scanner.nextLine().split(sep, col)));
-				list.remove(list.size()-1);
-				if(setNote){
-					list.remove(list.size()-1);
+				if(isEmptyContent(list)){
+					continue;
 				}
-				ArrayList<JSONObject> synonym = parseSynonym(convertToJSONObject(list, header), header, setNote);
-				System.out.println("synonym: " + synonym);
+				JSONObject json = convertToJSONObject(list, header);
+				// 建立 jstree 只需要 path，所以將權威詞刪掉，如果有註解的話也刪掉
+				if(json.has("名")){
+					json.remove("名");
+				}
+				if(json.has("註解")){
+					json.remove("註解");
+				}
+				ArrayList<JSONObject> synonym = parseSynonym(json, header, setNote);
 				data.addAll(synonym);
-//				data.add(list);
 			}
 			Collections.sort(data, pathComparator);
 			fileInputStream.close();
@@ -366,14 +334,19 @@ public class UploadAuthority {
 		} 
 		
 		
-		return toJstreeJSON(title, header, data, setNote);
+		return toJstreeJSON(title, header, data, setNote, userName);
 	}
 	
-	public static Comparator<ArrayList<String>> pathComparator = new Comparator<ArrayList<String>>() {
+	public static Comparator<JSONObject> pathComparator = new Comparator<JSONObject>() {
 
-		public int compare(ArrayList<String> arr1, ArrayList<String> arr2) {
-		   String path1 = arr1.toString().replaceAll("[\\[\\] ]", "").replace(",", "/");
-		   String path2 = arr2.toString().replaceAll("[\\[\\] ]", "").replace(",", "/");
+		public int compare(JSONObject json1, JSONObject json2) {
+			String path1 = "", path2 = "";
+			for(String key : json1.keySet()){
+				path1 += json1.getString(key);
+			}
+			for(String key : json2.keySet()){
+				path2 += json2.getString(key);
+			}
 
 		   //ascending order
 		   return path1.compareTo(path2);
@@ -386,161 +359,74 @@ public class UploadAuthority {
 	 * @param fileName 權威檔名        ex: "本草綱目.tsv"
 	 * @param title    檔威檔標題   ex: "本草綱目"
 	 * */
-	public JSONObject tsvToJstreeJSON(String filePath, String fileName, String title, boolean setNote){
+	public JSONObject tsvToJstreeJSON(String filePath, String fileName, String title, boolean setNote, String userName){
 		
 		String sep = "\t";
 		FileInputStream fileInputStream = null;
 		Scanner scanner = null;
-		ArrayList<ArrayList<String>> data = new ArrayList<ArrayList<String>>();
-		ArrayList<String> headers = null;
+		ArrayList<JSONObject> data = new ArrayList<JSONObject>();
+		ArrayList<String> header = null;
 		try {
 			fileInputStream = new FileInputStream(filePath + fileName);
 			scanner = new Scanner(fileInputStream, "UTF-8");
 			
 			// 第一行當作 header，以 header 的欄位數為基準
-			headers = new ArrayList<String>(Arrays.asList(scanner.nextLine().split(sep)));
-			int col = headers.size();
+			header = new ArrayList<String>(Arrays.asList(scanner.nextLine().split(sep)));
+			int col = header.size();
+			header.remove(header.size()-1);
+			if(setNote){
+				header.remove(header.size()-1);
+			}
 			while(scanner.hasNextLine()){
 				
 				// "a,b,c,d".split(sep, col)
 				// 如果該筆資料的欄位數小於 col不影響結果。col=5, ["a", "b", "c", "d"]
 				// 如果該筆資料的欄位數大於 col會截斷字串。col=3, ["a", "b", "c,d"]
-				ArrayList<String> list = new ArrayList<String>(Arrays.asList(scanner.nextLine().split(sep, col)));		
-				list.remove(list.size()-1);
-				if(setNote){
-					list.remove(list.size()-1);
+				ArrayList<String> list = new ArrayList<String>(Arrays.asList(scanner.nextLine().split(sep, col)));
+				if(isEmptyContent(list)){
+					continue;
 				}
-				data.add(list);
+				JSONObject json = convertToJSONObject(list, header);
+				// 建立 jstree 只需要 path，所以將權威詞刪掉，如果有註解的話也刪掉
+				if(json.has("名")){
+					json.remove("名");
+				}
+				if(json.has("註解")){
+					json.remove("註解");
+				}
+				ArrayList<JSONObject> synonym = parseSynonym(json, header, setNote);
+				data.addAll(synonym);
 			}
-			
 			Collections.sort(data, pathComparator);
 			fileInputStream.close();
 			scanner.close();
-		
 		} catch(IOException e){
 			e.printStackTrace();
 		} 
-		return toJstreeJSON(title, headers, data, setNote);
-	}
-	
-	
-	public static JSONArray toSolrDoc(String filePath, String fileName, String title, String authorityId, ArrayList<ArrayList<String>> data, boolean setNote){
 		
-
-		JSONArray arr = new JSONArray();
-		
-		HashSet<String> keyword_set = new HashSet<String>(); // 相同路徑重複的關鍵字
-		HashMap<String, String> loc = new HashMap<String, String>(); // 權威詞讀入的順序
-		for(ArrayList<String> row : data){
-							
-			// get path. ['水部', '地水類', '流水'] -> 本草綱目/水部/天水類/雨水/
-			String path = title + "/";
-			int i, x = setNote ? 2 : 1;
-			for(i = 0; i < row.size()-x; ++i){
-				if(!row.get(i).equals(""))
-					path += row.get(i) + "/";
-			}
-			
-			
-
-			// 過濾同路徑相同的權威詞
-			// 不重複: 本草綱目/水部/天水類/雨水/雨水 & 本草綱目/水部/天水類/立春雨水/雨水
-			String keyword = row.get(i++);
-			if(keyword_set.contains(path + keyword)){
-				System.out.println("duplicate: " + row);
-			}
-			
-			// 如果沒設定註解 i==row.size()，設為"無"
-			// 如果有設定註解，直接給值，但是空字串的話，設為"無"
-			String note = i==row.size() ? "無" : (row.get(i).equals("") ? "無" : row.get(i)); 
-			
-			System.out.println(path + keyword);
-			// 過濾空字串和重複的關鍵字
-			if(!keyword.equals("") && !keyword_set.contains(path + keyword)){
-				if(!loc.containsKey(keyword)){
-					loc.put(keyword, String.valueOf(loc.size()));
-				}
-				JSONObject json = new JSONObject();  // solr document的型式
-				json.put("authorityId", authorityId);
-				json.put("loc", loc.get(keyword));
-				json.put("path", path);
-				json.put("text", keyword.trim());
-				json.put("note", note);
-				json.put("hidden", "false");
-				
-				arr.put(json);
-				keyword_set.add(path + keyword);
-			}
-		}
-
-		return arr;
+		return toJstreeJSON(title, header, data, setNote, userName);
 	}
 	
 	public JSONArray csvToSolrDoc(String filePath, String fileName, String title, String authorityId, boolean setNote)throws AuthorityFileUploadException{
 		
 		String sep = ",";
 		ArrayList<JSONObject> data = readTextUploadFile(filePath, fileName, sep, setNote);
-		return toSolrDoc2(title, authorityId, data);
+		return toSolrDoc(title, authorityId, data);
 	}
 	
 	public JSONArray tsvToSolrDoc(String filePath, String fileName, String title, String authorityId, boolean setNote) throws AuthorityFileUploadException{
 		
 		String sep = "\t";
 		ArrayList<JSONObject> data = readTextUploadFile(filePath, fileName, sep, setNote);
-		return toSolrDoc2(title, authorityId, data);
+		return toSolrDoc(title, authorityId, data);
 	}
 	
 	public JSONArray txtToSolrDoc(String filePath, String fileName, String title, String authorityId, boolean setNote) throws AuthorityFileUploadException{
 	
 		String sep = "\n";
 		ArrayList<JSONObject> data = readTextUploadFile(filePath, fileName, sep, setNote);
-		return toSolrDoc2(title, authorityId, data);
+		return toSolrDoc(title, authorityId, data);
 	}
-	
-	
-	
-//	@SuppressWarnings("deprecation")
-//	public JSONArray xlsxToSolrDoc(String filePath, String fileName, String title, String authorityId, boolean setNote) throws AuthorityFileUploadException{
-//		
-//		ArrayList<ArrayList<String>> data = new ArrayList<ArrayList<String>>();
-//		
-//		try {
-//			// Excel -> XSSFWorkbook -> XSSFSheet -> XSSFRow -> XSSFCell
-//			InputStream excelToRead = new FileInputStream(filePath + fileName);	// 讀Excel		
-//			XSSFWorkbook workbook = new XSSFWorkbook(excelToRead); // poi 用 XSSFWorkbook 操作 Excel
-//			XSSFSheet sheet = workbook.getSheetAt(0); // 取得第一個試算表			
-//			Iterator<Row> rows = sheet.rowIterator(); // 取得試算表的 row iterator
-//			
-//			ArrayList<String> header = UploadAuthority.XSSFRowToHeader((XSSFRow) rows.next()); // 第一行當作 header
-//			this.authorityFileUploadException.setHeader(header);
-//			validateHeader(header, setNote); // 驗證 header格式
-//			
-//			int limit = header.size(), num = 1; 
-//			while(rows.hasNext()){
-//				
-//				XSSFRow row = (XSSFRow) rows.next();
-//				if(!isEmptyXSSFRow(row)){
-//					ArrayList<String> row_data = UploadAuthority.XSSFRowToArrayList(row, limit);
-//					// 驗證 row data格式
-//					if(validate(row_data, setNote, num)){
-//						ArrayList<ArrayList<String>> multikeyword = parseMultikeyword(row_data, setNote); // 解析同一欄位多個關鍵字
-//						for(int i = 0; i < multikeyword.size(); ++i){
-//							data.add(multikeyword.get(i));
-//						}
-//					}
-//					++num;
-//				}
-//			}
-//			workbook.close();
-//		}  catch (IOException | JSONException e) {
-//			e.printStackTrace();
-//		}
-//
-//		if(this.authorityFileUploadException.getHasException()){
-//			throw this.authorityFileUploadException;
-//		}
-//		return toSolrDoc(filePath, fileName, title, authorityId, data, setNote);
-//	}
 	
 	/**
 	 * 逐行讀取權威檔資料成 ArrayList<ArrayList<String>>，再轉換成 solr document型式的 JSONArray
@@ -573,9 +459,9 @@ public class UploadAuthority {
 				if(!isEmptyXSSFRow(row)){
 					JSONObject json_data = UploadAuthority.XSSFRowToJSONObject(row, header);
 					// 驗證 row data格式
-					if(validate2(json_data, num)){
+					if(validate(json_data, num)){
 						ArrayList<JSONObject> synonym = parseSynonym(json_data, header, setNote);
-						System.out.println("synonym: " + synonym);
+//						System.out.println("synonym: " + synonym);
 						data.addAll(synonym);
 					}
 					++num;
@@ -590,10 +476,10 @@ public class UploadAuthority {
 		if(this.authorityFileUploadException.getHasException()){
 			throw this.authorityFileUploadException;
 		}
-		return toSolrDoc2(title, authorityId, data);
+		return toSolrDoc(title, authorityId, data);
 	}
 	
-	public JSONArray toSolrDoc2(String title, String authorityId, ArrayList<JSONObject> data){
+	public JSONArray toSolrDoc(String title, String authorityId, ArrayList<JSONObject> data){
 		
 
 		JSONArray arr = new JSONArray();
@@ -612,7 +498,7 @@ public class UploadAuthority {
 					path += value + "/";
 				}
 			}
-			if(json.has("extraPath")){
+			if(json.has("extraPath") && !json.getString("extraPath").equals("")){
 				path += json.getString("extraPath") + "/";
 			}
 			
@@ -666,8 +552,10 @@ public class UploadAuthority {
 	public static JSONObject convertToJSONObject(ArrayList<String> arr, ArrayList<String> header){
 		
 		JSONObject json = new JSONObject();
-		for(int i = 0; i < header.size() && i < arr.size(); ++i){
-			json.put(header.get(i), arr.get(i));
+		System.out.println("convertToJSONObject arr" + arr);
+		for(int i = 0; i < header.size(); ++i){
+			String value = i < arr.size() ? arr.get(i) : "";
+			json.put(header.get(i), value);
 		}
 //		System.out.println(json);
 		json.put("extraPath", "");
@@ -675,7 +563,7 @@ public class UploadAuthority {
 	}
 
 	
-	private boolean isEmptyXSSFRow(XSSFRow row) {
+	private static boolean isEmptyXSSFRow(XSSFRow row) {
 	    
 		if (row == null) {
 	        return true;
@@ -694,46 +582,52 @@ public class UploadAuthority {
 	/**
 	 * 解析同義詞
 	 * */
-	public ArrayList<JSONObject> parseSynonym(JSONObject json_data, ArrayList<String> header, boolean setNote){
+	public static ArrayList<JSONObject> parseSynonym(JSONObject json_data, ArrayList<String> header, boolean setNote){
 		
 		ArrayList<ArrayList<String>> synonymPath  = new ArrayList<ArrayList<String>>();
+		System.out.println(json_data);
 		for(String key : header){
 			if(key.equals("名")){
 				break;
 			}
 			ArrayList<String> arr = new ArrayList<String>();
-			String str = json_data.getString(key).replace("(", this.synonymSeparatar).replace(")", "");
-			arr.addAll(new ArrayList<String>(Arrays.asList(str.split(this.synonymSeparatar))));
+			String str = json_data.getString(key).replace("(", synonymSeparatar).replace(")", "");
+			arr.addAll(new ArrayList<String>(Arrays.asList(str.split(synonymSeparatar))));
 			synonymPath.add(arr);
 		}
 		
 //		System.out.println(synonymPath);
 		
 		ArrayList<JSONObject> res = buildSynonymPath(synonymPath, new JSONObject(), header, 0);
-		
-		String keyword = json_data.getString("名").replace("(", this.synonymSeparatar).replace(")"	, "");
-		String note    = json_data.has("註解") ? json_data.getString("註解") : "無";
-		ArrayList<String> multiKeyword = new ArrayList<String>(Arrays.asList(keyword.split(this.synonymSeparatar)));
 		ArrayList<JSONObject> synonym = new ArrayList<JSONObject>();
-		for(int i = 0; i < res.size(); ++i){
-			
-			for(int j = 0; j < multiKeyword.size(); ++j){
-				JSONObject json = copyFrom(res.get(i));
-				if(multiKeyword.size() > 1){
-					json.put("extraPath", multiKeyword.get(0));
+		if(json_data.has("名")){ // for solr document
+			String keyword = json_data.getString("名").replace("(", synonymSeparatar).replace(")"	, "");
+			String note    = json_data.has("註解") ? json_data.getString("註解") : "無";
+			ArrayList<String> synonymKeyword = new ArrayList<String>(Arrays.asList(keyword.split(synonymSeparatar)));
+			for(int i = 0; i < res.size(); ++i){
+				
+				for(int j = 0; j < synonymKeyword.size(); ++j){
+					JSONObject json = copyFrom(res.get(i));
+					if(synonymKeyword.size() > 1){
+						json.put("extraPath", synonymKeyword.get(0));
+					}
+					json.put("名", synonymKeyword.get(j));
+					json.put("註解", note);
+					synonym.add(json);
 				}
-				json.put("名", multiKeyword.get(j));
-				json.put("註解", note);
-				synonym.add(json);
 			}
+		} else{ // for jstree json
+			synonym = res;
 		}
+		System.out.println(synonym);
+		System.out.println();
 		return synonym;
 	}
 	
 	/**
 	 * 產生同義的資料
 	 * */
-	private ArrayList<JSONObject> buildSynonymPath(ArrayList<ArrayList<String>> synonym, JSONObject json, ArrayList<String> header, int i){
+	private static ArrayList<JSONObject> buildSynonymPath(ArrayList<ArrayList<String>> synonym, JSONObject json, ArrayList<String> header, int i){
 		
 		if(synonym.size() == i){
 			return null;
@@ -826,7 +720,7 @@ public class UploadAuthority {
 	 * @param setNote 是否設定註解
 	 * @param index   第幾筆資料
 	 * */
-	public boolean validate2(JSONObject json, int index) {
+	public boolean validate(JSONObject json, int index) {
 		
 		ArrayList<String> header = this.authorityFileUploadException.getHeader();
 		boolean isValidate = true;
@@ -976,32 +870,33 @@ public class UploadAuthority {
 	
 	public static void main(String[] args) {
 		
-		String filePath = "data/csv/";		
+		String filePath = "data/xlsx/";		
 		String title = "本草綱目";
 		
 //		String fileName = "藥名.txt";		
-		String fileName = "本草綱目.csv";
+//		String fileName = "本草綱目.csv";
 //		String fileName = "本草綱目.xlsx";
 //		String fileName = "太平廣記卷96權威詞.xlsx";
-//		String fileName = "太平廣記卷96權威詞-synonym.xlsx";
+		String fileName = "太平廣記卷96權威詞-synonym.xlsx";
 		String authorityId = "0";
+		String username = "chiamin";
 		boolean setNote = true;
 		
 		UploadAuthority uploadAuthority = new UploadAuthority();
 		try {
 			long start = new Date().getTime();
 //			JSONArray arr = uploadAuthority.txtToSolrDoc(filePath, fileName, title, authorityId, setNote);
-			JSONArray arr = uploadAuthority.csvToSolrDoc(filePath, fileName, title, authorityId, setNote);
+//			JSONArray arr = uploadAuthority.csvToSolrDoc(filePath, fileName, title, authorityId, setNote);
 //			JSONArray arr = uploadAuthority.tsvToSolrDoc(filePath, fileName, title, authorityId, setNote);
 			
-//			JSONArray arr = uploadAuthority.xlsxToSolrDoc(filePath, fileName, title, authorityId, setNote);
+			JSONArray arr = uploadAuthority.xlsxToSolrDoc(filePath, fileName, title, authorityId, setNote);
 //			long time = new Date().getTime();
 			
-//			JSONObject obj = uploadAuthority.txtToJstreeJSON(title);
-			JSONObject obj = uploadAuthority.csvToJstreeJSON(filePath, fileName, title, setNote);
-//			JSONObject obj = uploadAuthority.tsvToJstreeJSON(filePath, fileName, title);
+//			JSONObject obj = uploadAuthority.txtToJstreeJSON(title, setNote, username);
+//			JSONObject obj = uploadAuthority.csvToJstreeJSON(filePath, fileName, title, setNote, username);
+//			JSONObject obj = uploadAuthority.tsvToJstreeJSON(filePath, fileName, title, setNote, username);
 			
-//			JSONObject obj = uploadAuthority.xlsxToJstreeJSON(filePath, fileName, title, setNote);
+			JSONObject obj = uploadAuthority.xlsxToJstreeJSON(filePath, fileName, title, setNote, username);
 //			long end = new Date().getTime();
 //			System.out.println(end - time);
 			System.out.println(arr);
@@ -1012,6 +907,7 @@ public class UploadAuthority {
 			e.printStackTrace();
 			String message = e.getMessage();
 			JSONArray error_data = e.getErrorData();
+			
 			ArrayList<String> error_msg = e.getErrorMessage();
 			for(int i = 0; i < error_msg.size(); ++i){
 				System.out.println(error_msg.get(i));
