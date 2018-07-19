@@ -14,12 +14,26 @@ public class JstreeNode {
 	public JstreeNode(){
 		this.data.put("remove", true);  // 可以刪除
 		this.data.put("rename", true);  // 可以更名
+		this.data.put("target", false);
+	}
+	
+	// copy contructor
+	public JstreeNode(JstreeNode node){
+		this.text = new String(node.getText());
+		this.type = new String(node.getType());
+		this.data = new JSONObject(node.getData());
+		this.children = new ArrayList<JstreeNode>(node.getChildren());
+	}
+	
+	public JstreeNode(JSONObject node){
+		this.fromJSON(node);
 	}
 	
 	public JstreeNode(String type){
 		this.type = type;
 		this.data.put("remove", true);
 		this.data.put("rename", true);
+		this.data.put("target", false);
 	}
 	
 	public JstreeNode(String text, String type, ArrayList<JstreeNode> children){
@@ -28,6 +42,7 @@ public class JstreeNode {
 		this.children = children;
 		this.data.put("remove", true);
 		this.data.put("rename", true);
+		this.data.put("target", false);
 	}
 	
 	public JstreeNode(String text, String type){
@@ -35,13 +50,21 @@ public class JstreeNode {
 		this.type = type;
 		this.data.put("remove", true);
 		this.data.put("rename", true);
+		this.data.put("target", false);
+	}
+	
+	public JstreeNode(String text, String type, boolean remove, boolean rename, boolean target){
+		this.text = text;
+		this.type = type;
+		this.data.put("remove", remove);
+		this.data.put("rename", rename);
+		this.data.put("target", target);
 	}
 	
 	/*
 	 * 新增節點
 	 * */
 	public void append(JstreeNode newNode){
-		
 		if(newNode == null)
 			return;
 		try {
@@ -83,7 +106,7 @@ public class JstreeNode {
 	}
 	
 	/*
-	 * ['水部', '天水類', '雨水'] -> JstreeNode
+	 * 階層: ['水部', '天水類', '雨水'] -> JstreeNode
 	 * */
 	public static JstreeNode toJstreeNode(ArrayList<String> path, int i){
 		
@@ -101,7 +124,7 @@ public class JstreeNode {
 				} catch (JSONException e) {
 					e.printStackTrace();
 				}
-			} else{
+			} else {
 				return toJstreeNode(path, i+1);
 			}
 		}
@@ -135,6 +158,7 @@ public class JstreeNode {
 		JSONObject init_data = new JSONObject();
 		init_data.put("remove", true);
 		init_data.put("rename", true);
+		init_data.put("target", false);
 		
 		this.text     = node.getString("text");
 		this.type     = node.getString("type");
@@ -165,6 +189,10 @@ public class JstreeNode {
 		return this.children;
 	}
 	
+	public boolean isTarget(){
+		return this.data.getBoolean("target");
+	}
+	
 	public void setText(String text){
 		this.text = text;
 	}
@@ -181,31 +209,41 @@ public class JstreeNode {
 		this.children = chhildren;
 	}
 	
+	public void setTarget(boolean isTarget){
+		this.data.put("target", isTarget);
+	}
+	
 	public static void main(String[] args){
 		
 		/* example 1*/
 		JstreeNode jstree = new JstreeNode("本草綱目", "default");
 		
-		JstreeNode node     = new JstreeNode("火部", "subDir");
-		JSONObject jsonNode = new JSONObject(); 
-		jsonNode.put("text", "石部");
-		jsonNode.put("type", "subDir");
-		jsonNode.put("children", new JSONArray());
+		JSONObject node = new JSONObject(); 
+		node.put("text", "石部");
+		node.put("type", "subDir");
+		node.put("children", new JSONArray());
+		JstreeNode jstreeNode = new JstreeNode(node);
+		jstreeNode.setTarget(true);
 		
 		ArrayList<String> path1 = new ArrayList<String>();
 		path1.add("水部");
 		path1.add("天水類");
 		path1.add("雨水");
+		path1.add("水");
 		
 		ArrayList<String> path2 = new ArrayList<String>();
 		path2.add("水部");
 		path2.add("天水類");
-		path2.add("梅雨水");
+		path2.add("雨水");
+		
+		path2.add("水");
+		path2.add("雨雨水");
 		
 		jstree.append(path1);
 		jstree.append(path2);
 		jstree.append(node);
-		jstree.append(jsonNode);
+		JstreeNode target = jstree.getChildren().get(0);
+		target.setTarget(true);
 		
 		System.out.println(jstree.toJSON());
 		/* end of example 1*/
