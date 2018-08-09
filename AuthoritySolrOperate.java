@@ -1,4 +1,4 @@
-﻿
+package ascdc.sinica.dhtext.util;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -7,11 +7,15 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.sql.DriverManager;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Properties;
 
 import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.apache.poi.poifs.filesystem.POIFSFileSystem;
@@ -32,19 +36,43 @@ import org.apache.solr.common.SolrInputDocument;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import com.google.gson.Gson;
+import java.sql.Connection;
+
+import ascdc.sinica.dhtext.tool.solr.UploadAuthority;
+import ascdc.sinica.dhtext.tool.tree.JstreeNode;
+import ascdc.sinica.dhtext.util.io.JSONOperate;
+import ascdc.sinica.dhtext.util.sys.Command;
+import dao.DictDAO;
+
 public class AuthoritySolrOperate {
 	
 	private final int BIGINTEGER = 1000000;  
 	private SolrClient solrClient = null;
-	private String solrServerURL = null;
-	private String corename = null;
+	private String solrServerURL = Command.solrServerURL;
+	private String corename = "keyword";
 	private String authorityId = null;
+	private ArrayList<String> header = new ArrayList<String>();
+	
 	
 	public AuthoritySolrOperate(String solrServerURL, String corename, String authorityId){
 		this.solrServerURL = solrServerURL;
 		this.corename = corename;
 		this.authorityId = authorityId;
 		this.solrClient = new HttpSolrClient(this.solrServerURL + this.corename);
+	}
+	
+	// chiamin
+	public AuthoritySolrOperate(String solrServerURL, String corename, String authorityId, Connection conn){
+		this.solrServerURL = solrServerURL;
+		this.corename = corename;
+		this.authorityId = authorityId;
+		this.solrClient = new HttpSolrClient(this.solrServerURL + this.corename);
+		
+		if(conn != null){
+			DictDAO dictDAO = new DictDAO(conn);
+			this.header = dictDAO.getHeader(Long.valueOf(authorityId));
+		}
 	}
 	
 	public ArrayList<String> hasDuplicateKeyword(ArrayList<String> keyword, String path){
@@ -55,11 +83,13 @@ public class AuthoritySolrOperate {
 		solrQuery.addFilterQuery("hidden:false");
 		solrQuery.addFilterQuery("path:" + path);
 		
+		
 		if(keyword.size() > 0){
 			String filterQuery = "{!terms f=text}" + keyword.toString().replaceAll("[\\[\\] ]", "");
 			solrQuery.addFilterQuery(filterQuery);
 		}
-		
+		SolrInputDocument solrInputDoc = new SolrInputDocument();
+		solrInputDoc.addField("price", new JSONObject("{\"set\": 10}"));
 		ArrayList<SolrInputDocument> solrDocList = this.getSolrQueryResponse(solrQuery);
 		ArrayList<String> duplicateText = new ArrayList<String>();
 		for(int i = 0; i < solrDocList.size(); ++i){
@@ -124,6 +154,8 @@ public class AuthoritySolrOperate {
 	
 	private ArrayList<SolrInputDocument> getSolrQueryResponse(SolrQuery solrQuery){
 		
+		//long start = new Date().getTime();
+		
 		ArrayList<SolrInputDocument> docArrList = new ArrayList<SolrInputDocument>();
 		try{
 			QueryResponse rsp = this.solrClient.query(solrQuery);
@@ -140,6 +172,7 @@ public class AuthoritySolrOperate {
 		} catch(SolrServerException | IOException e){
 			e.printStackTrace();
 		}
+		//System.out.println("getSolrQueryResponse: " + String.valueOf(new Date().getTime() - start));
 		return docArrList;
 	}
 	
@@ -149,7 +182,7 @@ public class AuthoritySolrOperate {
 	  */
 	public ArrayList<SolrInputDocument> getSolrDoc(String hidden, String fl, String sort){
 		
-		long start = new Date().getTime();
+//		long start = new Date().getTime();
 		
 		SolrQuery solrQuery = new SolrQuery();
 		solrQuery.set("q", "authorityId:" + this.authorityId);
@@ -159,7 +192,7 @@ public class AuthoritySolrOperate {
 		solrQuery.addFilterQuery("hidden:" + hidden);
 		
 		ArrayList<SolrInputDocument> res = this.getSolrQueryResponse(solrQuery);
-		System.out.println("getSolrDoc: " + String.valueOf(new Date().getTime() - start));
+//		System.out.println("getSolrDoc: " + String.valueOf(new Date().getTime() - start));
 		return res;
 	}
 	
@@ -170,7 +203,7 @@ public class AuthoritySolrOperate {
 	  */
 	public ArrayList<SolrInputDocument> getSolrDocByText(String hidden, String fl, ArrayList<String> keyword){
 		
-		long start = new Date().getTime();
+//		long begin = new Date().getTime();
 		
 		SolrQuery solrQuery = new SolrQuery();
 		solrQuery.set("q", "authorityId:" + this.authorityId);
@@ -181,15 +214,10 @@ public class AuthoritySolrOperate {
 		if(keyword.size() > 0){
 			String filterQuery = "{!terms f=text}" + keyword.toString().replaceAll("[\\[\\] ]", ""); // match '[', ']', ' ' 
 			solrQuery.addFilterQuery(filterQuery);
-//			String filterQuery = "text:" + keyword.get(0);
-//			for(int i = 1; i < keyword.size(); ++i){
-//				filterQuery += " || text:" + keyword.get(i);
-//			}
-//			solrQuery.addFilterQuery(filterQuery);
 		}
 		
 		ArrayList<SolrInputDocument> res = this.getSolrQueryResponse(solrQuery);
-		System.out.println("getSolrDocByText: " + String.valueOf(new Date().getTime() - start));
+//		System.out.println("getSolrDocByText: " + String.valueOf(new Date().getTime() - begin));
 		
 		return res;
 	}
@@ -198,16 +226,17 @@ public class AuthoritySolrOperate {
 	  * 回傳指定 id 的 solr document，使用者點選的權威詞，所以一定是 hidden:false
 	  * @param idList  
 	  */
-	public ArrayList<SolrInputDocument> getSolrDocById(List<String> idList){
+	public ArrayList<SolrInputDocument> getSolrDocById(List<String> idList, String fl){
 		
-		long start_ = new Date().getTime();
+//		long begin = new Date().getTime();
 		
 		ArrayList<SolrInputDocument> res = new ArrayList<SolrInputDocument>();
 		int batchSize = 50;
 		int size = idList.size();
-		int iteration = (int) Math.ceil((double)size / batchSize);//Math.floorDiv(size, batchSize);
+		int iteration = (int) Math.ceil((double)size / batchSize);
 		SolrQuery solrQuery = new SolrQuery();
 		solrQuery.set("q", "authorityId:" + this.authorityId);
+		solrQuery.set("fl", fl);
 		solrQuery.set("rows", this.BIGINTEGER);
 		for(int i = 0; i < iteration; ++i){
 				
@@ -224,7 +253,7 @@ public class AuthoritySolrOperate {
 			res.addAll(solrDocList);
 		}
 		
-		System.out.println("getSolrDocById: " + String.valueOf(new Date().getTime() - start_));
+//		System.out.println("getSolrDocById: " + String.valueOf(new Date().getTime() - begin));
 		return res;
 	}
 	
@@ -234,18 +263,19 @@ public class AuthoritySolrOperate {
 	  * @param path  
 	  * @param hidden ["*", "true", "false"]
 	  */
-	public ArrayList<SolrInputDocument> getSolrDocByPath(String path, String hidden){
+	public ArrayList<SolrInputDocument> getSolrDocByPath(String path, String hidden, String fl){
 		
-		long start = new Date().getTime();
+//		long begin = new Date().getTime();
 		
 		SolrQuery solrQuery = new SolrQuery();
 		solrQuery.set("q", "authorityId:" + this.authorityId);
+		solrQuery.set("fl",  fl);
 		solrQuery.set("rows", this.BIGINTEGER);
 		solrQuery.addFilterQuery("path:" + path);
 		solrQuery.addFilterQuery("hidden:" + hidden);
 	
 		ArrayList<SolrInputDocument> res = this.getSolrQueryResponse(solrQuery);
-		System.out.println("getSolrDocByPath: " + String.valueOf(new Date().getTime() - start));
+//		System.out.println("getSolrDocByPath: " + String.valueOf(new Date().getTime() - begin));
 		
 		return res;
 	}
@@ -256,27 +286,37 @@ public class AuthoritySolrOperate {
 	  * @param hidden ["*", "true", "false"]
 	  * @param keyword
 	  */
-	public ArrayList<SolrInputDocument> getSolrDocByPath(String path, String hidden, ArrayList<String> keyword){
+	public ArrayList<SolrInputDocument> getSolrDocByPath(String path, String hidden, String fl, ArrayList<String> keyword){
 		
-		long start = new Date().getTime();
+//		long begin = new Date().getTime();
 		
-		SolrQuery solrQuery = new SolrQuery();
-		solrQuery.set("q", "authorityId:" + this.authorityId);
-		solrQuery.set("rows", this.BIGINTEGER);
-		solrQuery.addFilterQuery("path:" + path);// 包含子層
-		solrQuery.addFilterQuery("hidden:" + hidden);
-		
-		if(keyword.size() > 0){
-			String filterQuery = "text:" + keyword.get(0);
-			for(int i = 1; i < keyword.size(); ++i){
-				filterQuery += " || text:" + keyword.get(i);
+		ArrayList<SolrInputDocument> res = new ArrayList<SolrInputDocument>();
+		int batchSize = 50;
+		int size = keyword.size();
+		int iteration = (int) Math.ceil((double)size / batchSize);
+		for(int i = 0; i < iteration; ++i){
+			
+			SolrQuery solrQuery = new SolrQuery();
+			solrQuery.set("q", "authorityId:" + this.authorityId);
+			solrQuery.set("fl", fl);
+			solrQuery.set("rows", this.BIGINTEGER);
+			solrQuery.addFilterQuery("path:" + path);// 包含子層
+			solrQuery.addFilterQuery("hidden:" + hidden);
+			
+			int start = i * batchSize;
+			int end   = start + batchSize < size ? start + batchSize : size;
+			
+			ArrayList<String> subList = new ArrayList<String>(keyword.subList(start, end));
+			if(subList.size() > 0){
+				String filterQuery = "{!terms f=text}" + subList.toString().replaceAll("[\\[\\] ]", ""); // match '[', ']', ' ' 
+				solrQuery.addFilterQuery(filterQuery);
 			}
-			solrQuery.addFilterQuery(filterQuery);
+			
+			ArrayList<SolrInputDocument> solrDocList = this.getSolrQueryResponse(solrQuery);
+			res.addAll(solrDocList);
 		}
 	
-		ArrayList<SolrInputDocument> res = this.getSolrQueryResponse(solrQuery);
-		System.out.println("getSolrDocByPathWithKeyword: " + String.valueOf(new Date().getTime() - start));
-		
+//		System.out.println("getSolrDocByPathWithKeyword: " + String.valueOf(new Date().getTime() - begin));
 		return res;
 	}
 	
@@ -286,17 +326,18 @@ public class AuthoritySolrOperate {
 	  */
 	public void update(ArrayList<SolrInputDocument> solrDocList){
 		
-		long start = new Date().getTime();
+//		long start = new Date().getTime();
 		
 		try {
 			if(solrDocList.size() > 0){
+			
 				UpdateResponse updateResponse = solrClient.add(solrDocList);
 				solrClient.commit();
 			}
 		} catch (SolrServerException | IOException e) {
 			e.printStackTrace();
 		}
-		System.out.println("update: " + String.valueOf(new Date().getTime() - start));
+//		System.out.println("update: " + String.valueOf(new Date().getTime() - start));
 	}
 	 
 	/**
@@ -305,15 +346,16 @@ public class AuthoritySolrOperate {
 	  */
 	public void deleteById(List<String> idToDel){
 		
-		long start = new Date().getTime();
+//		long begin = new Date().getTime();
 		
-		ArrayList<SolrInputDocument> docArrList = this.getSolrDocById(idToDel);
+		String fl = "*";
+		ArrayList<SolrInputDocument> docArrList = this.getSolrDocById(idToDel, fl);
 		for(int i = 0; i < docArrList.size(); ++i){
 			docArrList.get(i).setField("hidden", "true");
 		}
 		this.update(docArrList);
 		
-		System.out.println("deleteById: " + String.valueOf(new Date().getTime() - start));
+//		System.out.println("deleteById: " + String.valueOf(new Date().getTime() - begin));
 	}
 	
 	
@@ -323,15 +365,18 @@ public class AuthoritySolrOperate {
 	  */
 	public void deleteByPath(String path){
 		
-		long start = new Date().getTime();
+//		long begin = new Date().getTime();
 		
-		ArrayList<SolrInputDocument> docArrList = this.getSolrDocByPath(path + "*", "false");
+		String hidden = "false";
+		String fl = "*";
+		ArrayList<SolrInputDocument> docArrList = this.getSolrDocByPath(path, hidden, fl);
+
 		for(int i = 0; i < docArrList.size(); ++i){
 			docArrList.get(i).setField("hidden", "true");
 		}
 		this.update(docArrList);
 		
-		System.out.println("deleteByPath: " + String.valueOf(new Date().getTime() - start));
+//		System.out.println("deleteByPath: " + String.valueOf(new Date().getTime() - begin));
 	}
 	
 	/**
@@ -341,19 +386,20 @@ public class AuthoritySolrOperate {
 	  */
 	public void renamePath(String oldPath, String newPath){
 		
-		long start = new Date().getTime();
+//		long begin = new Date().getTime();
 		
-		ArrayList<SolrInputDocument> docArrList = this.getSolrDocByPath(oldPath + "*", "*");
+		String hidden = "*";
+		String fl = "*";
+		ArrayList<SolrInputDocument> docArrList = this.getSolrDocByPath(oldPath + "*", hidden, fl);
 		for(int i = 0; i < docArrList.size(); ++i){
 			String path = docArrList.get(i).getFieldValue("path").toString();
 			docArrList.get(i).setField("path", path.replace(oldPath, newPath));
 		}
 		this.update(docArrList);
 		
-		System.out.println("renamePath: " + String.valueOf(new Date().getTime() - start));
+//		System.out.println("renamePath: " + String.valueOf(new Date().getTime() - begin));
 
 	}
-
 	
 	/**
 	  * 從 solr 匯出權威檔成XLSX
@@ -395,18 +441,24 @@ public class AuthoritySolrOperate {
 		System.out.println("parsing solrDocList: " + String.valueOf(time2 - time1));
 		
 		ByteArrayOutputStream baos = null;
-        try{ 
-          
+       try{ 
 		    XSSFWorkbook wb = new XSSFWorkbook(); 
 		    XSSFSheet sheet = wb.createSheet(); 
 		    
 		    // 寫入標頭
 	        XSSFRow header = sheet.createRow(0);
-	        for(int i = 1; i <= nHier; ++i){
-	        	header.createCell(i-1).setCellValue("第" + i + "層");
+	        for(int i = 0; i < nHier; ++i){
+	        	
+	        	// chiamin
+	        	if(i < this.header.size() - 2){
+	        		header.createCell(i).setCellValue(this.header.get(i));
+	        	} else {
+	        		header.createCell(i).setCellValue("extra path");
+	        	}
 	        }
 	        header.createCell(nHier).setCellValue("名");
 	        header.createCell(nHier+1).setCellValue("註解");
+	        
 	        
 	        // 寫入每筆資料
 	        for(int i = 0; i < data.length(); ++i){
@@ -441,12 +493,182 @@ public class AuthoritySolrOperate {
 	        baos.close(); 
 	        wb.close();
 	        
-        }catch(IOException e){ 
-          e.printStackTrace(); 
-        }
-        
-        return baos;
+       }catch(IOException e){ 
+         e.printStackTrace(); 
+       }
+       
+       return baos;
+	}
+
+	
+	/**
+	  * authorityId的權威檔是否存在
+	  */
+	public boolean duplicateAuthorityId(String authorityId){
+		
+		SolrQuery solrQuery = new SolrQuery();
+		solrQuery.set("q", "authorityId:" + authorityId);
+		
+		try{
+			QueryResponse rsp = this.solrClient.query(solrQuery);
+			return rsp.getResults().size() > 0;
+		}catch (SolrServerException | IOException e) {
+			e.printStackTrace();
+		}
+		
+		return false;
 	}
 	
+	/**
+	  * 複製新的權威檔
+	  */
+	public void clone(String newAuthorityId, String newTitle){
+		
+		if(this.duplicateAuthorityId(newAuthorityId)){
+			System.out.println("重複的權威檔 ID: " + newAuthorityId);
+			return;
+		}
+		
+		String hidden = "*";
+		String sort = "";
+		String fl = "path,text,note,loc,hidden";
+		ArrayList<SolrInputDocument> solrDocList = this.getSolrDoc(hidden, fl, sort);
+		
+		for(int i = 0; i < solrDocList.size(); ++i){
+			SolrInputDocument SolrDoc = solrDocList.get(i); 
+			String path = SolrDoc.getFieldValue("path").toString();
+			int    pos  = path.indexOf("/");
+			String newPath = newTitle + path.substring(pos);
+			
+			SolrDoc.setField("authorityId", newAuthorityId);
+			SolrDoc.setField("path", newPath);
+		}
+		this.update(solrDocList);
+	}
+	
+	public JstreeNode getJstree(){
+		
+		String hidden = "false";
+		String fl = "path";
+		String sort = "path asc";
+		ArrayList<SolrInputDocument> solrDocList = getSolrDoc(hidden, fl, sort);
+		String title = "";
+		
+		String type = "default";
+		JstreeNode jstree = new JstreeNode(type);
+		for(int i = 0; i < solrDocList.size(); ++i){
+			SolrInputDocument solrDoc = solrDocList.get(i);
+			ArrayList<String> path = new ArrayList<String>(Arrays.asList(solrDoc.getFieldValue("path").toString().split("/")));
+			title = path.get(0);
+			path.remove(0);
+			JstreeNode node = JstreeNode.toJstreeNode(path, 0);
+			jstree.append(node);
+		}
+		jstree.setText(title);
+		return jstree;
+	}
+
+
+	
+	public static void main(String[] args) {
+		
+		
+		Connection conn = null;
+		try{
+			//String mysqlUrl = "jdbc:mysql://172.16.10.64:3306/dhtext";
+			String mysqlUrl = "jdbc:mysql://127.0.0.1:3306/dhtext";
+			String mysqlUser = "dhtext";
+			String mysqlPassword = "dhtext";
+			Properties mysqlProps = new Properties();
+	        mysqlProps.put("user", mysqlUser);
+	        mysqlProps.put("password", mysqlPassword);
+	        mysqlProps.put("SetBigStringTryClob", "true");
+			Class.forName("org.mariadb.jdbc.Driver");
+	        conn = DriverManager.getConnection(mysqlUrl, mysqlProps);
+		}catch(Exception e){
+			e.printStackTrace();
+			//out.println("<br>"+e+"  Cannot access The Database<br>");
+		}
+		
+//		JSONArray solrArr = new JSONArray();
+//		JSONObject obj = new JSONObject();
+//		obj.put("path", "本草綱目/火部/");
+//		obj.put("note", "無");
+//		obj.put("loc", "[12]");
+//		obj.put("authorityId", "212");
+//		obj.put("hidden", "false");
+//		obj.put("text", "淫雨");
+//		solrArr.put(obj);
+//		solrArr.put(0, obj);
+//		System.out.println(solrArr);
+		
+//		HashMap<String, String> map = new HashMap<String, String>();
+//		map.put("a", "1");
+//		map.put("b", "3");
+//		System.out.println(map.toString());
+		
+		
+		
+		// solr server config
+		String solrServerURL = "http://127.0.0.1:8983/solr/";      
+		String corename = "keyword";
+//		
+//		
+//		String filePath = "export/";
+//		String fileName = "本草綱目.xlsx";
+//		String fileName = "本草綱目.txt";
+
+		String authorityId = "345";
+		String hidden = "*";
+		String fl = "*";
+		AuthoritySolrOperate aso = new AuthoritySolrOperate(solrServerURL, corename, authorityId, conn); //不需要連接mysql就給null
+		JstreeNode jstree  = aso.getJstree();
+
+		System.out.println(jstree.toJSON());
+//		ArrayList<SolrInputDocument> solrDocList = aso.getSolrDoc(hidden, fl, "");
+//		ArrayList<String> path = new ArrayList<String>();
+//		for(int i = 0; i < solrDocList.size(); ++i){
+//			path.add(solrDocList.get(i).getFieldValue("path").toString());
+//		}
+//		System.out.println(path);
+//		Collections.sort(path);
+//		System.out.println(path);
+		
+//		authoritySolrOperate.exportXLSX(filePath, fileName);
+		
+//		fileName = "本草綱目_onlyText.xlsx";
+//		authoritySolrOperate.exportXLSXOnlyText(filePath, fileName);
+//		
+//		fileName = "本草綱目.txt";
+//		authoritySolrOperate.exportTXT(filePath, fileName);
+		
+//		List<String> idToDel = new ArrayList<String>();
+//		idToDel.add("8ee2c424-2da9-42c4-8c9e-02527fd650b0");
+//		idToDel.add("0f233e18-7997-4d0f-9210-35f66c800f17");
+//		idToDel.add("ab041474-6c19-4961-b333-bbee367ef937");
+//		authoritySolrOperate.deleteById(idToDel);
+		
+//		System.out.println(Math.floorDiv(1, 50));
+//		System.out.println(Math.ceil(1 / (float)50));
+		
+//		SolrInputDocument solrDoc = new SolrInputDocument();
+//		solrDoc.addField("text", "value");
+//		solrDoc.removeField("text");
+//		System.out.println(solrDoc);
+		
+//		ArrayList<ArrayList<String>> arr = new ArrayList<ArrayList<String>>();
+//		ArrayList<String> arr2 = new ArrayList<String>();
+//		arr.add(arr2);
+//		JSONObject obj = new JSONObject();
+//		obj.put("arr", new Gson().toJson(arr));
+//		String str = obj.getString("arr");
+//		ArrayList<ArrayList<String>> list = new Gson().fromJson(str, ArrayList.class);
+//		System.out.println(list);
+		
+		
+		
+		
+		
+	}
 
 }
